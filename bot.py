@@ -1042,7 +1042,7 @@ class CaptPagedPickView(discord.ui.View):
 
     @discord.ui.button(label="➡️ Оставить в записи", style=discord.ButtonStyle.success)
     async def keep_in_signup(self, interaction: discord.Interaction, _: discord.ui.Button):
-        await self._move_users(interaction, "Основы")
+        await self._move_users(interaction, "Основа")
 
     @discord.ui.button(label="🔄 Переместить в замену", style=discord.ButtonStyle.primary)
     async def move_to_backup(self, interaction: discord.Interaction, _: discord.ui.Button):
@@ -1185,7 +1185,7 @@ class CaptView(discord.ui.View):
                     await interaction.response.send_message(f"✅ Основа заполнена (макс. {CAPT_MAIN_LIMIT}), вы добавлены в **замену**!", ephemeral=True)
                     await send_capt_log(self.guild, "Запись в CAPT", f"{interaction.user.mention} записался в замену")
                 else:
-                    self.users["Основы"].append(uid)
+                    self.users["Основа"].append(uid)
                     await interaction.response.send_message("✅ Вы записались в **основу**!", ephemeral=True)
                     await send_capt_log(self.guild, "Запись в CAPT", f"{interaction.user.mention} записался в основу")
         
