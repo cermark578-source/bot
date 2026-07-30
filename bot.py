@@ -81,7 +81,13 @@ TOKEN = os.getenv("DISCORD_TOKEN") or os.getenv("TOKEN")
 GUILD_ID = int(os.getenv("GUILD_ID", "0"))
 REQUIRED_ROLE_ID = int(os.getenv("REQUIRED_ROLE_ID", "0"))
 CAPT_CHANNEL_ID = int(os.getenv("CAPT_CHANNEL_ID", "0"))
+
+# Каналы для логов
 LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID", "0"))
+LOG_CAPT_CHANNEL_ID = int(os.getenv("LOG_CAPT_CHANNEL_ID", "0"))
+LOG_MCL_CHANNEL_ID = int(os.getenv("LOG_MCL_CHANNEL_ID", "0"))
+LOG_VOICE_CHANNEL_ID = int(os.getenv("LOG_VOICE_CHANNEL_ID", "0"))
+
 LOGO_URL = os.getenv("LOGO_URL", "")
 REGENT_GIF_URL = os.getenv("REGENT_GIF_URL", "")
 
@@ -529,7 +535,6 @@ ACTIVE_CAPTS = {}
 # ============================================================
 
 def get_role_by_name_or_id(guild: discord.Guild, role_identifier: str) -> discord.Role | None:
-    """Получает роль по ID или имени"""
     if not role_identifier:
         return None
     try:
@@ -540,7 +545,6 @@ def get_role_by_name_or_id(guild: discord.Guild, role_identifier: str) -> discor
     return discord.utils.get(guild.roles, name=role_identifier)
 
 def get_allowed_roles(guild: discord.Guild) -> list[discord.Role]:
-    """Возвращает список ролей для доступа к тикетам"""
     roles = []
     recruiter_role = get_role_by_name_or_id(guild, ROLE_RECRUITER)
     if recruiter_role:
@@ -552,6 +556,77 @@ def get_allowed_roles(guild: discord.Guild) -> list[discord.Role]:
     if dep_owner_role:
         roles.append(dep_owner_role)
     return roles
+
+def get_log_channel(guild: discord.Guild, channel_id: int) -> discord.TextChannel | None:
+    if not channel_id:
+        return None
+    channel = guild.get_channel(channel_id)
+    if isinstance(channel, (discord.TextChannel, discord.Thread)):
+        return channel
+    return None
+
+async def send_capt_log(guild: discord.Guild, action: str, details: str = "", color: int = 0x00FF00):
+    try:
+        channel = get_log_channel(guild, LOG_CAPT_CHANNEL_ID)
+        if not channel:
+            channel = get_log_channel(guild, LOG_CHANNEL_ID)
+        if not channel:
+            return
+        
+        embed = discord.Embed(
+            title="🎯 CAPT Лог",
+            description=f"**Действие:** {action}\n{details}",
+            color=color,
+            timestamp=datetime.now(tz=MOSCOW) if MOSCOW else datetime.now()
+        )
+        thumb = _thumb_url(guild)
+        if thumb: embed.set_thumbnail(url=thumb)
+        embed.set_footer(text="Система логирования CAPT")
+        await channel.send(embed=embed)
+    except Exception as e:
+        log.error(f"Ошибка отправки CAPT лога: {e}")
+
+async def send_mcl_log(guild: discord.Guild, action: str, details: str = "", color: int = 0x00FF00):
+    try:
+        channel = get_log_channel(guild, LOG_MCL_CHANNEL_ID)
+        if not channel:
+            channel = get_log_channel(guild, LOG_CHANNEL_ID)
+        if not channel:
+            return
+        
+        embed = discord.Embed(
+            title="🏆 MCL/ZoneWars Лог",
+            description=f"**Действие:** {action}\n{details}",
+            color=color,
+            timestamp=datetime.now(tz=MOSCOW) if MOSCOW else datetime.now()
+        )
+        thumb = _thumb_url(guild)
+        if thumb: embed.set_thumbnail(url=thumb)
+        embed.set_footer(text="Система логирования MCL")
+        await channel.send(embed=embed)
+    except Exception as e:
+        log.error(f"Ошибка отправки MCL лога: {e}")
+
+async def send_voice_log(guild: discord.Guild, action: str, details: str = "", color: int = 0x00FF00):
+    try:
+        channel = get_log_channel(guild, LOG_VOICE_CHANNEL_ID)
+        if not channel:
+            channel = get_log_channel(guild, LOG_CHANNEL_ID)
+        if not channel:
+            return
+        
+        embed = discord.Embed(
+            title="🔊 Голосовой лог",
+            description=f"**Действие:** {action}\n{details}",
+            color=color,
+            timestamp=datetime.now(tz=MOSCOW) if MOSCOW else datetime.now()
+        )
+        thumb = _thumb_url(guild)
+        if thumb: embed.set_thumbnail(url=thumb)
+        embed.set_footer(text="Система логирования голосовых каналов")
+        await channel.send(embed=embed)
+    except Exception as e:
+        log.error(f"Ошибка отправки голосового лога: {e}")
 
 async def send_log(guild: discord.Guild | None, actor: discord.abc.User, action: str, details: str = "", color: int = 0xFFFFFF):
     try:
@@ -805,9 +880,7 @@ class CloseTicketView(View):
 # ===================== CAPT С КАТЕГОРИЯМИ =====================
 # ============================================================
 
-# Максимальное количество в основе CAPT
 CAPT_MAIN_LIMIT = 35
-# Максимальное общее количество CAPT (основа + замена)
 CAPT_MAX_TOTAL = 99
 
 def make_main_embed(starts_at: datetime, users: dict, guild: discord.Guild,
@@ -836,7 +909,6 @@ def make_main_embed(starts_at: datetime, users: dict, guild: discord.Guild,
                     user_list.append(f"{i}. {m.mention}")
                 else:
                     user_list.append(f"{i}. <@{uid}>")
-            # Добавляем информацию о лимите для основы
             if category_name == "Основы":
                 limit_text = f" (макс. {CAPT_MAIN_LIMIT})"
             else:
@@ -1017,7 +1089,7 @@ class CaptPagedPickView(discord.ui.View):
             ephemeral=True
         )
         
-        await send_log(self.capt.guild, interaction.user, f"CAPT: Перемещение в {target_category}", f"количество: {moved_count}")
+        await send_capt_log(self.capt.guild, "Перемещение участников", f"Перемещено {moved_count} человек в категорию {target_category}")
 
 
 class CaptView(discord.ui.View):
@@ -1093,7 +1165,6 @@ class CaptView(discord.ui.View):
         async with self._lock:
             uid = interaction.user.id
             
-            # Проверяем, не записан ли уже пользователь
             found = False
             for category, user_list in self.users.items():
                 if uid in user_list:
@@ -1101,25 +1172,23 @@ class CaptView(discord.ui.View):
                     break
             
             if not found:
-                # Проверяем общий лимит
                 total = sum(len(v) for v in self.users.values())
                 if total >= CAPT_MAX_TOTAL:
                     await interaction.response.send_message(f"❌ Достигнут общий лимит ({CAPT_MAX_TOTAL} человек)!", ephemeral=True)
                     return
                 
-                # Проверяем лимит в основе
                 main_count = len(self.users.get("Основы", []))
                 if main_count >= CAPT_MAIN_LIMIT:
-                    # Если основа заполнена - кидаем в замену
                     if "Замена" not in self.users:
                         self.users["Замена"] = []
                     self.users["Замена"].append(uid)
                     await interaction.response.send_message(f"✅ Основа заполнена (макс. {CAPT_MAIN_LIMIT}), вы добавлены в **замену**!", ephemeral=True)
+                    await send_capt_log(self.guild, "Запись в CAPT", f"{interaction.user.mention} записался в замену")
                 else:
                     self.users["Основы"].append(uid)
                     await interaction.response.send_message("✅ Вы записались в **основу**!", ephemeral=True)
+                    await send_capt_log(self.guild, "Запись в CAPT", f"{interaction.user.mention} записался в основу")
         
-        await send_log(self.guild, interaction.user, f"{self.event_name}: Записаться", "")
         await self.refresh_announce()
 
     @discord.ui.button(label="Покинуть", style=discord.ButtonStyle.danger)
@@ -1127,10 +1196,13 @@ class CaptView(discord.ui.View):
         async with self._lock:
             uid = interaction.user.id
             changed = False
+            category_name = None
             for category, user_list in self.users.items():
                 if uid in user_list:
+                    category_name = category
                     user_list.remove(uid)
                     changed = True
+                    break
             
             if uid in self.picked_list:
                 self.picked_list.remove(uid)
@@ -1141,9 +1213,10 @@ class CaptView(discord.ui.View):
         
         await interaction.response.send_message("✅ Вы покинули список.", ephemeral=True)
         if changed:
-            await send_log(self.guild, interaction.user, f"{self.event_name}: Покинуть", "")
             await self.refresh_announce()
             await self.refresh_pick_embed(interaction.channel, interaction.user)
+            if category_name:
+                await send_capt_log(self.guild, "Выход из CAPT", f"{interaction.user.mention} покинул категорию {category_name}")
 
     @discord.ui.button(label="ВЫБОР", style=discord.ButtonStyle.primary)
     async def pick(self, interaction: discord.Interaction, _: discord.ui.Button):
@@ -1223,7 +1296,7 @@ class CaptPickedControlsView(discord.ui.View):
             return await interaction.response.send_message("Вы не в списке выбранных.", ephemeral=True)
         self.capt.confirmed.add(uid)
         await self.capt.refresh_pick_embed(interaction.channel, interaction.user)
-        await send_log(self.capt.guild, interaction.user, "Подтверждение CAPT", "Пользователь подтвердил 100%")
+        await send_capt_log(self.capt.guild, "Подтверждение участия", f"{interaction.user.mention} подтвердил участие")
         await interaction.response.send_message("✅ Присутствие подтверждено.", ephemeral=True)
 
     @discord.ui.button(label="Покинуть", style=discord.ButtonStyle.danger)
@@ -1236,7 +1309,7 @@ class CaptPickedControlsView(discord.ui.View):
             self.capt.confirmed.discard(uid); changed = True
         if changed:
             await self.capt.refresh_pick_embed(interaction.channel, interaction.user)
-            await send_log(self.capt.guild, interaction.user, "Покинуть CAPT", "Пользователь покинул список выбранных")
+            await send_capt_log(self.capt.guild, "Выход из выбранных", f"{interaction.user.mention} покинул список выбранных")
             try:
                 await interaction.response.send_message("Удалено из выбранных.", ephemeral=True)
             except Exception:
@@ -1334,8 +1407,10 @@ class ChangeCaptTitleModal(discord.ui.Modal, title="Изменить назва�
             await interaction.response.send_message("❌ Название не может быть пустым.", ephemeral=True)
             return
         
+        old_title = self.capt.title
         self.capt.title = new_title
         await self.capt.refresh_announce()
+        await send_capt_log(self.capt.guild, "Изменение названия CAPT", f"Название изменено с '{old_title}' на '{new_title}'")
         await interaction.response.send_message(f"✅ Название CAPT изменено на **{new_title}**", ephemeral=True)
 
 
@@ -1400,15 +1475,12 @@ class UserAddView(discord.ui.View):
                     break
             
             if not found:
-                # Проверяем общий лимит
                 total = sum(len(v) for v in self.capt.users.values())
                 if total >= CAPT_MAX_TOTAL:
                     await interaction.response.send_message(f"❌ Достигнут общий лимит ({CAPT_MAX_TOTAL} человек)!", ephemeral=True)
                     return
                 
-                # Проверяем лимит основы при добавлении в основу
                 if self.category == "Основы" and len(self.capt.users.get("Основы", [])) >= CAPT_MAIN_LIMIT:
-                    # Если основа заполнена - добавляем в замену
                     if "Замена" not in self.capt.users:
                         self.capt.users["Замена"] = []
                     self.capt.users["Замена"].append(uid)
@@ -1421,6 +1493,7 @@ class UserAddView(discord.ui.View):
         
         if added > 0:
             await self.capt.refresh_announce()
+            await send_capt_log(self.capt.guild, "Добавление участников", f"Добавлено {added} человек в категорию {self.category}")
             await interaction.response.send_message(
                 f"✅ Добавлено {added} пользователей: {', '.join(mention_list[:10])}",
                 ephemeral=True
@@ -1515,6 +1588,7 @@ class RenameCategoryModal(discord.ui.Modal, title="Переименовать к
         self.capt.users[new_name] = users
         
         await self.capt.refresh_announce()
+        await send_capt_log(self.capt.guild, "Переименование категории", f"Категория '{self.old_name}' переименована в '{new_name}'")
         await interaction.response.send_message(f"✅ Категория **{self.old_name}** переименована в **{new_name}**.", ephemeral=True)
 
 
@@ -1560,6 +1634,7 @@ class ConfirmDeleteView(discord.ui.View):
         if self.category in self.capt.users:
             del self.capt.users[self.category]
             await self.capt.refresh_announce()
+            await send_capt_log(self.capt.guild, "Удаление категории", f"Категория '{self.category}' удалена")
             await interaction.response.send_message(f"✅ Категория **{self.category}** удалена.", ephemeral=True)
         else:
             await interaction.response.send_message(f"❌ Категория **{self.category}** не найдена.", ephemeral=True)
@@ -1595,6 +1670,7 @@ class NewCategoryModal(discord.ui.Modal, title="Создать новую кат
         
         self.capt.users[name] = []
         await self.capt.refresh_announce()
+        await send_capt_log(self.capt.guild, "Создание категории", f"Создана категория '{name}'")
         await interaction.response.send_message(f"✅ Категория **{name}** создана.", ephemeral=True)
 
 
@@ -1627,8 +1703,10 @@ class CategoryClearView(discord.ui.View):
         
         for category in self.capt.users.keys():
             if interaction.data.get("custom_id") == f"clear_{category}":
+                count = len(self.capt.users[category])
                 self.capt.users[category] = []
                 await self.capt.refresh_announce()
+                await send_capt_log(self.capt.guild, "Очистка категории", f"Категория '{category}' очищена ({count} пользователей)")
                 await interaction.response.send_message(f"✅ Категория **{category}** очищена.", ephemeral=True)
                 return False
         return True
@@ -1637,9 +1715,7 @@ class CategoryClearView(discord.ui.View):
 # ===================== MCL / ZoneWars ========================
 # ============================================================
 
-# Максимальное количество в основе MCL/ZoneWars
 MCL_MAIN_LIMIT = 25
-# Максимальное общее количество MCL/ZoneWars (основа + замена)
 MCL_MAX_TOTAL = 99
 
 class MclView(discord.ui.View):
@@ -1699,7 +1775,6 @@ class MclView(discord.ui.View):
                         user_list.append(f"{i}. {m.mention}")
                     else:
                         user_list.append(f"{i}. <@{uid}>")
-                # Добавляем информацию о лимите
                 limit_text = f" (макс. {self.max_pick})" if category_name == "Основы" else ""
                 desc += f"\n**{category_name} [{len(user_ids)}]{limit_text}**\n" + "\n".join(user_list)
         
@@ -1748,25 +1823,23 @@ class MclView(discord.ui.View):
                     break
             
             if not found:
-                # Проверяем общий лимит
                 total = sum(len(v) for v in self.users.values())
                 if total >= MCL_MAX_TOTAL:
                     await interaction.response.send_message(f"❌ Достигнут общий лимит ({MCL_MAX_TOTAL} человек)!", ephemeral=True)
                     return
                 
-                # Проверяем лимит в основе
                 main_count = len(self.users.get("Основы", []))
                 if main_count >= self.max_pick:
-                    # Если основа заполнена - кидаем в замену
                     if "Замена" not in self.users:
                         self.users["Замена"] = []
                     self.users["Замена"].append(uid)
                     await interaction.response.send_message(f"✅ Основа заполнена (макс. {self.max_pick}), вы добавлены в **замену**!", ephemeral=True)
+                    await send_mcl_log(self.guild, f"Запись в {self.event_name}", f"{interaction.user.mention} записался в замену")
                 else:
                     self.users["Основы"].append(uid)
                     await interaction.response.send_message("✅ Вы записались в **основу**!", ephemeral=True)
+                    await send_mcl_log(self.guild, f"Запись в {self.event_name}", f"{interaction.user.mention} записался в основу")
         
-        await send_log(self.guild, interaction.user, f"{self.event_name}: Записаться", "")
         await self.refresh_main()
 
     @discord.ui.button(label="Покинуть", style=discord.ButtonStyle.danger)
@@ -1774,10 +1847,13 @@ class MclView(discord.ui.View):
         async with self._lock:
             uid = interaction.user.id
             changed = False
+            category_name = None
             for category, user_list in self.users.items():
                 if uid in user_list:
+                    category_name = category
                     user_list.remove(uid)
                     changed = True
+                    break
             
             if uid in self.selected_ids:
                 self.selected_ids.remove(uid)
@@ -1788,8 +1864,9 @@ class MclView(discord.ui.View):
         
         await interaction.response.send_message("✅ Вы покинули список.", ephemeral=True)
         if changed:
-            await send_log(self.guild, interaction.user, f"{self.event_name}: Покинуть", "")
             await self.refresh_main()
+            if category_name:
+                await send_mcl_log(self.guild, f"Выход из {self.event_name}", f"{interaction.user.mention} покинул категорию {category_name}")
 
     @discord.ui.button(label="ВЫБОР", style=discord.ButtonStyle.primary)
     async def pick_btn(self, interaction: discord.Interaction, _: discord.ui.Button):
@@ -2001,7 +2078,53 @@ class MclPagedPickView(discord.ui.View):
             ephemeral=True
         )
         
-        await send_log(self.mcl.guild, interaction.user, f"{self.mcl.event_name}: Перемещение в {target_category}", f"количество: {moved_count}")
+        await send_mcl_log(self.mcl.guild, f"Перемещение участников {self.mcl.event_name}", f"Перемещено {moved_count} человек в категорию {target_category}")
+
+# ============================================================
+# ===================== ГОЛОСОВЫЕ ЛОГИ =========================
+# ============================================================
+
+@bot.event
+async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
+    if before.channel is None and after.channel is not None:
+        await send_voice_log(
+            member.guild,
+            "🔵 Вход в голосовой канал",
+            f"{member.mention} зашёл в канал **{after.channel.name}**",
+            0x00FF00
+        )
+        shop_db.update_streak(member.id)
+    
+    elif before.channel is not None and after.channel is None:
+        await send_voice_log(
+            member.guild,
+            "🔴 Выход из голосового канала",
+            f"{member.mention} вышел из канала **{before.channel.name}**",
+            0xFF0000
+        )
+        
+        user_data = shop_db.get_user(member.id)
+        last_reward = datetime.strptime(user_data[4], '%Y-%m-%d %H:%M:%S.%f') if user_data[4] else datetime.now()
+        time_diff = (datetime.now() - last_reward).total_seconds()
+        
+        if time_diff > 60 and before.channel.id != ROLE_AFK_ID:
+            multiplier = 1
+            if member.guild.get_role(ROLE_DONOR_ID) in member.roles:
+                multiplier = 2
+            elif member.guild.get_role(ROLE_BOOSTER_ID) in member.roles:
+                multiplier = 1.5
+                
+            amount = (time_diff / INTERVAL_SECONDS) * AP_PER_INTERVAL * multiplier
+            if amount > 0:
+                shop_db.update_points(member.id, amount)
+    
+    elif before.channel is not None and after.channel is not None and before.channel != after.channel:
+        await send_voice_log(
+            member.guild,
+            "🔄 Перемещение",
+            f"{member.mention} переместился из канала **{before.channel.name}** в канал **{after.channel.name}**",
+            0xFFFF00
+        )
 
 # ============================================================
 # ===================== REGENT FAMQ ===========================
@@ -2720,27 +2843,6 @@ async def check_voice_rewards():
                     except:
                         pass
 
-@bot.event
-async def on_voice_state_update(member, before, after):
-    if before.channel is None and after.channel is not None:
-        shop_db.update_streak(member.id)
-    
-    elif before.channel is not None and after.channel is None:
-        user_data = shop_db.get_user(member.id)
-        last_reward = datetime.strptime(user_data[4], '%Y-%m-%d %H:%M:%S.%f') if user_data[4] else datetime.now()
-        time_diff = (datetime.now() - last_reward).total_seconds()
-        
-        if time_diff > 60 and before.channel.id != ROLE_AFK_ID:
-            multiplier = 1
-            if member.guild.get_role(ROLE_DONOR_ID) in member.roles:
-                multiplier = 2
-            elif member.guild.get_role(ROLE_BOOSTER_ID) in member.roles:
-                multiplier = 1.5
-                
-            amount = (time_diff / INTERVAL_SECONDS) * AP_PER_INTERVAL * multiplier
-            if amount > 0:
-                shop_db.update_points(member.id, amount)
-
 # ============================================================
 # ===================== НАГРАДЫ ЗА СОБЫТИЯ =====================
 # ============================================================
@@ -3165,6 +3267,8 @@ async def create_mcl(interaction: discord.Interaction, opis: str, voice: discord
         pass
     msg = await interaction.channel.send(content="@everyone", embed=embed, view=view, allowed_mentions=allowed)
     view.message = msg
+    
+    await send_mcl_log(interaction.guild, "Создание MCL", f"Создано объявление MCL от {author.mention}")
 
 @bot.tree.command(name="create-zonewars", description="Создать объявление ZoneWars: описание, канал, старт, телепортация. Лимит основы 25, общий 99.")
 @role_required_check()
@@ -3213,6 +3317,8 @@ async def create_zonewars(interaction: discord.Interaction, opis: str, voice: di
         pass
     msg = await interaction.channel.send(content="@everyone", embed=embed, view=view, allowed_mentions=allowed)
     view.message = msg
+    
+    await send_mcl_log(interaction.guild, "Создание ZoneWars", f"Создано объявление ZoneWars от {author.mention}")
 
 @bot.tree.command(name="create-capt", description="Создать CAPT с таймером, пингом @everyone. Лимит основы 35, общий 99.")
 @role_required_check()
@@ -3246,6 +3352,8 @@ async def create_capt(interaction: discord.Interaction, start_time: str, title: 
     msg = await interaction.channel.send(content="@everyone", embed=embed, view=view, allowed_mentions=allowed)
     view.message = msg
     ACTIVE_CAPTS.setdefault((interaction.guild.id, interaction.channel.id), []).append(view)
+    
+    await send_capt_log(interaction.guild, "Создание CAPT", f"Создано CAPT '{title}' от {author.mention} на {starts_at.strftime('%d.%m.%Y %H:%M')}")
 
     async def ticker():
         try:
@@ -3256,6 +3364,7 @@ async def create_capt(interaction: discord.Interaction, start_time: str, title: 
                         final = make_main_embed(starts_at, view.users, interaction.guild, author, image_url, title)
                         final.description += "\n**CAPT начался.**"
                         await msg.edit(embed=final, view=view)
+                        await send_capt_log(interaction.guild, "CAPT начался", f"CAPT '{title}' начался в {starts_at.strftime('%d.%m.%Y %H:%M')}")
                         break
                 except Exception:
                     break
