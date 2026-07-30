@@ -10,17 +10,17 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# ===== Часовой пояс Europe/Warsaw =====
-def get_warsaw_tz():
+# ===== Часовой пояс Москва (UTC+3) =====
+def get_moscow_tz():
     try:
         from zoneinfo import ZoneInfo
         try:
-            return ZoneInfo("Europe/Warsaw")
+            return ZoneInfo("Europe/Moscow")
         except Exception:
             try:
                 import tzdata
                 from zoneinfo import ZoneInfo as ZI2
-                return ZI2("Europe/Warsaw")
+                return ZI2("Europe/Moscow")
             except Exception:
                 pass
     except Exception:
@@ -30,7 +30,7 @@ def get_warsaw_tz():
     except Exception:
         return None
 
-WARSAW = get_warsaw_tz()
+MOSCOW = get_moscow_tz()
 
 # ===== Discord =====
 import discord
@@ -99,7 +99,7 @@ CAPT_REWARD = float(os.getenv("CAPT_REWARD", "2.0"))
 MCL_REWARD = float(os.getenv("MCL_REWARD", "1.5"))
 ZONEWARS_REWARD = float(os.getenv("ZONEWARS_REWARD", "1.5"))
 
-# Конфигурация Regent FamQ - ИСПРАВЛЕНО: теперь роли хранятся как ID или имя
+# Конфигурация Regent FamQ
 ROLE_RECRUITER = os.getenv("ROLE_RECRUITER", "𝐑𝐞𝐜𝐫𝐮𝐢𝐭👨🏻‍💻")
 ROLE_APPLICANT = os.getenv("ROLE_APPLICANT", "Подал заявку")
 ROLE_OWNER = os.getenv("ROLE_OWNER", "𝙊𝙬𝙣𝙚𝙧👑")
@@ -528,45 +528,29 @@ ACTIVE_CAPTS = {}
 # ===================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==============
 # ============================================================
 
-# ===== ФУНКЦИЯ ДЛЯ ПОЛУЧЕНИЯ РОЛЕЙ С ПОДДЕРЖКОЙ ИМЕНИ =====
 def get_role_by_name_or_id(guild: discord.Guild, role_identifier: str) -> discord.Role | None:
-    """
-    Получает роль по ID (если строка состоит только из цифр) или по имени.
-    """
+    """Получает роль по ID или имени"""
     if not role_identifier:
         return None
-    
-    # Пробуем как ID
     try:
         role_id = int(role_identifier)
         return guild.get_role(role_id)
     except ValueError:
         pass
-    
-    # Пробуем как имя
     return discord.utils.get(guild.roles, name=role_identifier)
 
 def get_allowed_roles(guild: discord.Guild) -> list[discord.Role]:
-    """
-    Возвращает список ролей, которые должны иметь доступ к тикетам.
-    """
+    """Возвращает список ролей для доступа к тикетам"""
     roles = []
-    
-    # Рекрутер
     recruiter_role = get_role_by_name_or_id(guild, ROLE_RECRUITER)
     if recruiter_role:
         roles.append(recruiter_role)
-    
-    # Владелец
     owner_role = get_role_by_name_or_id(guild, ROLE_OWNER)
     if owner_role:
         roles.append(owner_role)
-    
-    # Зам. владельца
     dep_owner_role = get_role_by_name_or_id(guild, ROLE_DEP_OWNER)
     if dep_owner_role:
         roles.append(dep_owner_role)
-    
     return roles
 
 async def send_log(guild: discord.Guild | None, actor: discord.abc.User, action: str, details: str = "", color: int = 0xFFFFFF):
@@ -589,8 +573,8 @@ async def send_log(guild: discord.Guild | None, actor: discord.abc.User, action:
         emb = discord.Embed(title="Лог", description=desc, color=color)
         thumb = _thumb_url(guild or getattr(actor, 'guild', None))
         if thumb: emb.set_thumbnail(url=thumb)
-        now_pl = datetime.now(tz=WARSAW) if WARSAW else datetime.now()
-        emb.set_footer(text=now_pl.strftime("%d.%m.%Y %H:%M"))
+        now_msk = datetime.now(tz=MOSCOW) if MOSCOW else datetime.now()
+        emb.set_footer(text=now_msk.strftime("%d.%m.%Y %H:%M"))
         await ch.send(embed=emb)
     except Exception:
         pass
@@ -636,10 +620,8 @@ def chunk_lines(lines, max_chars: int = 1800):
 def parse_time_input(text: str):
     if not text:
         return None
-    
     try:
         text = text.lower().strip()
-        
         if re.match(r'^\d{1,2}:\d{2}$', text):
             h, m = map(int, text.split(':'))
             now = datetime.now()
@@ -647,21 +629,17 @@ def parse_time_input(text: str):
             if dt <= now:
                 dt = dt + timedelta(days=1)
             return dt
-        
         if re.match(r'^\d+$', text):
             minutes = int(text)
             return datetime.now() + timedelta(minutes=minutes)
-        
         minutes_match = re.search(r'(\d+)\s*мин(ут)?(ы)?', text)
         if minutes_match:
             minutes = int(minutes_match.group(1))
             return datetime.now() + timedelta(minutes=minutes)
-        
         hours_match = re.search(r'(\d+)\s*ч(ас)?(ов)?', text)
         if hours_match:
             hours = int(hours_match.group(1))
             return datetime.now() + timedelta(hours=hours)
-        
         through = re.search(r'через\s*(\d+)\s*(мин|ч|час)', text)
         if through:
             num = int(through.group(1))
@@ -670,7 +648,6 @@ def parse_time_input(text: str):
                 return datetime.now() + timedelta(hours=num)
             else:
                 return datetime.now() + timedelta(minutes=num)
-        
         numbers = re.findall(r'\d+', text)
         if numbers:
             num = int(numbers[0])
@@ -678,7 +655,6 @@ def parse_time_input(text: str):
                 return datetime.now() + timedelta(hours=num)
             else:
                 return datetime.now() + timedelta(minutes=num)
-        
         return None
     except Exception:
         return None
@@ -688,7 +664,6 @@ def format_time_ago(dt_str: str) -> str:
         dt = datetime.fromisoformat(dt_str)
         diff = datetime.now() - dt
         seconds = int(diff.total_seconds())
-        
         if seconds < 60:
             return f"{seconds} секунд назад"
         elif seconds < 3600:
@@ -713,7 +688,6 @@ def format_time_until(dt_str: str) -> str:
         dt = datetime.fromisoformat(dt_str)
         diff = dt - datetime.now()
         seconds = int(diff.total_seconds())
-        
         if seconds < 0:
             return "уже должен вернуться"
         elif seconds < 60:
@@ -738,7 +712,6 @@ def format_time_until(dt_str: str) -> str:
 # ============================================================
 
 async def generate_transcript(channel: discord.TextChannel, ticket_id: int) -> str:
-    """Генерирует HTML транскрипт переписки в канале"""
     messages = []
     async for msg in channel.history(limit=200, oldest_first=True):
         if msg.author.bot:
@@ -787,55 +760,44 @@ class CloseTicketView(View):
     @discord.ui.button(label="📄 Создать транскрипт", style=discord.ButtonStyle.primary)
     async def transcript_button(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer(ephemeral=True, thinking=True)
-        
         channel = interaction.guild.get_channel(self.channel_id)
         if not channel:
             await interaction.followup.send("❌ Канал не найден.", ephemeral=True)
             return
-        
         html = await generate_transcript(channel, self.ticket_id)
-        
         filename = f"transcript_ticket_{self.ticket_id}.html"
         with open(filename, "w", encoding="utf-8") as f:
             f.write(html)
-        
         with open(filename, "rb") as f:
             file = discord.File(f, filename=filename)
             await interaction.followup.send("📄 Транскрипт создан:", file=file, ephemeral=True)
-        
         os.remove(filename)
 
     @discord.ui.button(label="🔒 Закрыть тикет", style=discord.ButtonStyle.danger)
     async def close_button(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer(ephemeral=True)
-        
         channel = interaction.guild.get_channel(self.channel_id)
         if channel:
             html = await generate_transcript(channel, self.ticket_id)
             filename = f"transcript_ticket_{self.ticket_id}.html"
             with open(filename, "w", encoding="utf-8") as f:
                 f.write(html)
-            
             log_channel = interaction.guild.get_channel(LOG_CHANNEL_ID)
             if log_channel:
                 with open(filename, "rb") as f:
                     file = discord.File(f, filename=filename)
                     await log_channel.send(f"📄 Транскрипт заявки #{self.ticket_id}", file=file)
-            
             os.remove(filename)
             await channel.delete(reason=f"Тикет #{self.ticket_id} закрыт")
-        
         tickets_db.update_status(self.ticket_id, "closed")
         await interaction.followup.send("✅ Тикет закрыт!", ephemeral=True)
 
     @discord.ui.button(label="🗑️ Удалить канал", style=discord.ButtonStyle.danger)
     async def delete_button(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer(ephemeral=True)
-        
         channel = interaction.guild.get_channel(self.channel_id)
         if channel:
             await channel.delete(reason=f"Канал тикета #{self.ticket_id} удалён")
-        
         tickets_db.update_status(self.ticket_id, "deleted")
         await interaction.followup.send("🗑️ Канал удалён!", ephemeral=True)
 
@@ -844,7 +806,7 @@ class CloseTicketView(View):
 # ============================================================
 
 def make_main_embed(starts_at: datetime, users: dict, guild: discord.Guild,
-                    author: discord.Member, image_url: str) -> discord.Embed:
+                    author: discord.Member, image_url: str, title: str = "CAPTURES!") -> discord.Embed:
     ts = int(starts_at.timestamp())
     chan = _channel_mention(guild)
     desc = (
@@ -858,7 +820,7 @@ def make_main_embed(starts_at: datetime, users: dict, guild: discord.Guild,
     total = sum(len(v) for v in users.values())
     desc += f"\n**Список ({total})**\n"
 
-    emb = discord.Embed(title="CAPTURES!", description=desc, color=0xFFFFFF)
+    emb = discord.Embed(title=title, description=desc, color=0xFFFFFF)
 
     for category_name, user_ids in users.items():
         if user_ids:
@@ -887,19 +849,17 @@ def make_pick_embed(selected_ids, total_count: int, guild: discord.Guild,
     for i, uid in enumerate(selected_ids, start=1):
         m = guild.get_member(uid)
         lines.append(f"{i}. {m.mention} | {m.display_name}" if m else f"{i}. <@{uid}>")
-    now_pl = datetime.now(tz=WARSAW) if WARSAW else datetime.now()
+    now_msk = datetime.now(tz=MOSCOW) if MOSCOW else datetime.now()
     desc = f"Выбрано {len(selected_ids)}/{total_count} человек:\n\n**Выбранные игроки:**\n" + ("\n".join(lines) if lines else "-")
     emb = discord.Embed(title="Список людей на captures!", description=desc, color=0xFFFFFF)
     thumb = _thumb_url(guild)
     if thumb: emb.set_thumbnail(url=thumb)
-    emb.set_footer(text=f"Создано {picker.display_name} • {now_pl.strftime('%d.%m.%Y %H:%M')}")
+    emb.set_footer(text=f"Создано {picker.display_name} • {now_msk.strftime('%d.%m.%Y %H:%M')}")
     return emb
 
 class CaptPagedPickView(discord.ui.View):
     PAGE_SIZE = 25
-    MAX_PICK = 25
-
-    def __init__(self, capt: "CaptView", picker: discord.Member, category: str = "Основы"):
+    MAX_PICK = 25    def __init__(self, capt: "CaptView", picker: discord.Member, category: str = "Основы"):
         super().__init__(timeout=300)
         self.capt = capt
         self.picker = picker
@@ -1049,9 +1009,9 @@ class CaptPagedPickView(discord.ui.View):
 
 
 class CaptView(discord.ui.View):
-    def __init__(self, starts_at: datetime, guild: discord.Guild, author: discord.Member, image_url: str):
+    def __init__(self, starts_at: datetime, guild: discord.Guild, author: discord.Member, image_url: str, title: str = "CAPTURES!"):
         try:
-            remain = int((starts_at - datetime.now(tz=WARSAW)).total_seconds())
+            remain = int((starts_at - datetime.now(tz=MOSCOW)).total_seconds())
         except Exception:
             remain = 0
         timeout_seconds = max(60, remain + 3600)
@@ -1067,6 +1027,7 @@ class CaptView(discord.ui.View):
         self.author = author
         self.event_name = "CAPT"
         self.image_url = image_url
+        self.title = title  # Новое поле для названия
         self.message: discord.Message | None = None
         self.pick_message: discord.Message | None = None
         self._lock = asyncio.Lock()
@@ -1074,7 +1035,7 @@ class CaptView(discord.ui.View):
     async def refresh_announce(self):
         if not self.message:
             return
-        emb = make_main_embed(self.starts_at, self.users, self.guild, self.author, self.image_url)
+        emb = make_main_embed(self.starts_at, self.users, self.guild, self.author, self.image_url, self.title)
         try:
             await self.message.edit(embed=emb, view=self)
         except Exception:
@@ -1270,6 +1231,13 @@ class PanelView(discord.ui.View):
         await interaction.response.send_message("Недостаточно прав для панели CAPT.", ephemeral=True)
         return False
 
+    @discord.ui.button(label="✏️ Изменить название CAPT", style=discord.ButtonStyle.primary)
+    async def change_title(self, interaction: discord.Interaction, _: discord.ui.Button):
+        if not await self._check_perms(interaction):
+            return
+        modal = ChangeCaptTitleModal(self.capt)
+        await interaction.response.send_modal(modal)
+
     @discord.ui.button(label="➕ Добавить в категорию", style=discord.ButtonStyle.success)
     async def add_users(self, interaction: discord.Interaction, _: discord.ui.Button):
         if not await self._check_perms(interaction):
@@ -1315,6 +1283,31 @@ class PanelView(discord.ui.View):
     @discord.ui.button(label="🔙 Назад", style=discord.ButtonStyle.secondary)
     async def back(self, interaction: discord.Interaction, _: discord.ui.Button):
         await interaction.response.edit_message(content="Панель CAPT закрыта.", view=None)
+
+
+class ChangeCaptTitleModal(discord.ui.Modal, title="Изменить название CAPT"):
+    def __init__(self, capt: "CaptView"):
+        super().__init__()
+        self.capt = capt
+        
+        self.title_input = discord.ui.TextInput(
+            label="Новое название CAPT",
+            placeholder="Введите новое название (например: CAPTURES!)",
+            required=True,
+            max_length=100,
+            default=capt.title
+        )
+        self.add_item(self.title_input)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        new_title = self.title_input.value.strip()
+        if not new_title:
+            await interaction.response.send_message("❌ Название не может быть пустым.", ephemeral=True)
+            return
+        
+        self.capt.title = new_title
+        await self.capt.refresh_announce()
+        await interaction.response.send_message(f"✅ Название CAPT изменено на **{new_title}**", ephemeral=True)
 
 
 class CategoryAddView(discord.ui.View):
@@ -1597,12 +1590,12 @@ class CategoryClearView(discord.ui.View):
         return True
 
 # ============================================================
-# ===================== MCL / ZoneWars (ОБНОВЛЕН) =============
+# ===================== MCL / ZoneWars ========================
 # ============================================================
 
 class MclView(discord.ui.View):
     def __init__(self, title_text: str, voice: discord.VoiceChannel, start_at: datetime, tp_at: datetime, guild: discord.Guild, author: discord.Member, event_name: str = "MCL", max_pick: int = 20):
-        remain = int((tp_at - datetime.now(tz=WARSAW)).total_seconds()) if WARSAW else 0
+        remain = int((tp_at - datetime.now(tz=MOSCOW)).total_seconds()) if MOSCOW else 0
         super().__init__(timeout=max(60, remain + 3600))
         self.title_text = title_text
         self.voice = voice
@@ -1613,7 +1606,6 @@ class MclView(discord.ui.View):
         self.event_name = event_name
         self.message: discord.Message | None = None
         self.max_pick = int(max(1, max_pick))
-        # Структура как у CAPT - категории
         self.users: dict[str, list[int]] = {
             "Основы": [],
             "Замена": []
@@ -1649,7 +1641,6 @@ class MclView(discord.ui.View):
             f"**Список ({total})**\n"
         )
         
-        # Добавляем категории
         for category_name, user_ids in self.users.items():
             if user_ids:
                 user_list = []
@@ -1672,7 +1663,7 @@ class MclView(discord.ui.View):
         return emb
 
     def make_selected_embed(self, picker: discord.Member):
-        now_pl = datetime.now(tz=WARSAW) if WARSAW else datetime.now()
+        now_msk = datetime.now(tz=MOSCOW) if MOSCOW else datetime.now()
         lines = []
         for i, uid in enumerate(self.selected_ids, start=1):
             m = self.guild.get_member(uid)
@@ -1692,7 +1683,7 @@ class MclView(discord.ui.View):
         thumb = _thumb_url(self.guild)
         if thumb:
             emb.set_thumbnail(url=thumb)
-        emb.set_footer(text=f"Выбрал: {picker.display_name} • {now_pl.strftime('%d.%m.%Y %H:%M')}")
+        emb.set_footer(text=f"Выбрал: {picker.display_name} • {now_msk.strftime('%d.%m.%Y %H:%M')}")
         return emb
 
     @discord.ui.button(label="Записаться", style=discord.ButtonStyle.success)
@@ -1746,7 +1737,6 @@ class MclView(discord.ui.View):
             await interaction.response.send_message("❌ Никто еще не записался.", ephemeral=True)
             return
         
-        # Показываем выбор категории
         view = MclCategoryChoiceView(self)
         await interaction.response.send_message(
             "Выберите категорию, из которой хотите выбрать людей:",
@@ -1954,7 +1944,7 @@ class MclPagedPickView(discord.ui.View):
 REGENT_INFO = """
 **Путь в семью начинается здесь!**
 
-> • Заявки в семью принимаются только на сервер **Phoenix**. Уведомление о приглашении на обзвон отправляется в ЛС (или в канал, если ЛС закрыты).
+> • Заявки в семью принимаются только на сервер **Memphis**. Уведомление о приглашении на обзвон отправляется в ЛС (или в канал, если ЛС закрыты).
 
 > • **Внимательно прочитайте ВСЕ ВОПРОСЫ** при подаче заявки, как основные, так и дополнительные внутри поля для ответа. Если не ответили на все вопросы — **ЗАЯВКА ОТКЛОНЯЕТСЯ.**
 
@@ -1976,6 +1966,7 @@ REGENT_INFO = """
 
 ---
 
+> • Подать заявку можно только при открытом наборе. Если не выходит — набор закрыт.
 """
 
 @bot.command(name="regent")
@@ -2035,7 +2026,6 @@ class RegentTicketModal(Modal):
         if not category:
             category = await guild.create_category(TICKETS_CATEGORY_NAME)
 
-        # ИСПРАВЛЕНО: получаем все роли с поддержкой имени через get_allowed_roles
         allowed_roles = get_allowed_roles(guild)
         recruiter_role = get_role_by_name_or_id(guild, ROLE_RECRUITER)
         owner_role = get_role_by_name_or_id(guild, ROLE_OWNER)
@@ -2046,7 +2036,6 @@ class RegentTicketModal(Modal):
             interaction.user: discord.PermissionOverwrite(read_messages=True, send_messages=True, attach_files=True, embed_links=True),
         }
         
-        # Добавляем все роли, которые имеют доступ
         for role in allowed_roles:
             overwrites[role] = discord.PermissionOverwrite(
                 read_messages=True, 
@@ -3087,9 +3076,9 @@ async def create_mcl(interaction: discord.Interaction, opis: str, voice: discord
         if not (0 <= hh <= 23 and 0 <= mm <= 59):
             raise ValueError("диапазон")
         try:
-            now_pl = datetime.now(tz=WARSAW)
-            t = datetime(now_pl.year, now_pl.month, now_pl.day, hh, mm, tzinfo=WARSAW)
-            return t if t > now_pl else t + timedelta(days=1)
+            now_msk = datetime.now(tz=MOSCOW)
+            t = datetime(now_msk.year, now_msk.month, now_msk.day, hh, mm, tzinfo=MOSCOW)
+            return t if t > now_msk else t + timedelta(days=1)
         except Exception:
             now_local = datetime.now()
             t = datetime(now_local.year, now_local.month, now_local.day, hh, mm)
@@ -3135,9 +3124,9 @@ async def create_zonewars(interaction: discord.Interaction, opis: str, voice: di
         if not (0 <= hh <= 23 and 0 <= mm <= 59):
             raise ValueError("диапазон")
         try:
-            now_pl = datetime.now(tz=WARSAW)
-            t = datetime(now_pl.year, now_pl.month, now_pl.day, hh, mm, tzinfo=WARSAW)
-            return t if t > now_pl else t + timedelta(days=1)
+            now_msk = datetime.now(tz=MOSCOW)
+            t = datetime(now_msk.year, now_msk.month, now_msk.day, hh, mm, tzinfo=MOSCOW)
+            return t if t > now_msk else t + timedelta(days=1)
         except Exception:
             now_local = datetime.now()
             t = datetime(now_local.year, now_local.month, now_local.day, hh, mm)
@@ -3163,25 +3152,28 @@ async def create_zonewars(interaction: discord.Interaction, opis: str, voice: di
 
 @bot.tree.command(name="create-capt", description="Создать CAPT с таймером, картинкой и пингом @everyone.")
 @role_required_check()
-@app_commands.describe(start_time="Время начала 24ч, например 15:40 (польское время).",
-                       image_url="Ссылка на большое изображение (покажется в embed).")
-async def create_capt(interaction: discord.Interaction, start_time: str, image_url: str):
+@app_commands.describe(
+    start_time="Время начала 24ч, например 15:40 (московское время).",
+    title="Название CAPT (например: CAPTURES! или Мой капт)",
+    image_url="Ссылка на изображение (опционально)"
+)
+async def create_capt(interaction: discord.Interaction, start_time: str, title: str = "CAPTURES!", image_url: str = None):
     try:
         hh, mm = (int(x) for x in start_time.strip().split(":"))
         assert 0 <= hh <= 23 and 0 <= mm <= 59
     except Exception:
         return await interaction.response.send_message("Укажите время **ЧЧ:ММ** (например 15:40).", ephemeral=True)
     try:
-        now_pl = datetime.now(tz=WARSAW)
-        today_start = datetime(now_pl.year, now_pl.month, now_pl.day, hh, mm, tzinfo=WARSAW)
-        starts_at = today_start if today_start > now_pl else today_start + timedelta(days=1)
+        now_msk = datetime.now(tz=MOSCOW)
+        today_start = datetime(now_msk.year, now_msk.month, now_msk.day, hh, mm, tzinfo=MOSCOW)
+        starts_at = today_start if today_start > now_msk else today_start + timedelta(days=1)
     except Exception:
         now_local = datetime.now()
         today_start = datetime(now_local.year, now_local.month, now_local.day, hh, mm)
         starts_at = today_start if today_start > now_local else today_start + timedelta(days=1)
     author = interaction.user if isinstance(interaction.user, discord.Member) else interaction.guild.get_member(interaction.user.id)
-    view = CaptView(starts_at, interaction.guild, author, image_url)
-    embed = make_main_embed(starts_at, view.users, interaction.guild, author, image_url)
+    view = CaptView(starts_at, interaction.guild, author, image_url, title)
+    embed = make_main_embed(starts_at, view.users, interaction.guild, author, image_url, title)
     allowed = discord.AllowedMentions(everyone=True)
     try:
         await interaction.response.send_message("✅ Объявление отправлено.", ephemeral=True)
@@ -3196,8 +3188,8 @@ async def create_capt(interaction: discord.Interaction, start_time: str, image_u
             while True:
                 await asyncio.sleep(15)
                 try:
-                    if datetime.now(tz=WARSAW) >= starts_at:
-                        final = make_main_embed(starts_at, view.users, interaction.guild, author, image_url)
+                    if datetime.now(tz=MOSCOW) >= starts_at:
+                        final = make_main_embed(starts_at, view.users, interaction.guild, author, image_url, title)
                         final.description += "\n**CAPT начался.**"
                         await msg.edit(embed=final, view=view)
                         break
