@@ -99,7 +99,7 @@ CAPT_REWARD = float(os.getenv("CAPT_REWARD", "2.0"))
 MCL_REWARD = float(os.getenv("MCL_REWARD", "1.5"))
 ZONEWARS_REWARD = float(os.getenv("ZONEWARS_REWARD", "1.5"))
 
-# Конфигурация Regent FamQ
+# Конфигурация Regent FamQ - ИСПРАВЛЕНО: теперь роли хранятся как ID или имя
 ROLE_RECRUITER = os.getenv("ROLE_RECRUITER", "𝐑𝐞𝐜𝐫𝐮𝐢𝐭👨🏻‍💻")
 ROLE_APPLICANT = os.getenv("ROLE_APPLICANT", "Подал заявку")
 ROLE_OWNER = os.getenv("ROLE_OWNER", "𝙊𝙬𝙣𝙚𝙧👑")
@@ -527,6 +527,47 @@ ACTIVE_CAPTS = {}
 # ============================================================
 # ===================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==============
 # ============================================================
+
+# ===== ФУНКЦИЯ ДЛЯ ПОЛУЧЕНИЯ РОЛЕЙ С ПОДДЕРЖКОЙ ИМЕНИ =====
+def get_role_by_name_or_id(guild: discord.Guild, role_identifier: str) -> discord.Role | None:
+    """
+    Получает роль по ID (если строка состоит только из цифр) или по имени.
+    """
+    if not role_identifier:
+        return None
+    
+    # Пробуем как ID
+    try:
+        role_id = int(role_identifier)
+        return guild.get_role(role_id)
+    except ValueError:
+        pass
+    
+    # Пробуем как имя
+    return discord.utils.get(guild.roles, name=role_identifier)
+
+def get_allowed_roles(guild: discord.Guild) -> list[discord.Role]:
+    """
+    Возвращает список ролей, которые должны иметь доступ к тикетам.
+    """
+    roles = []
+    
+    # Рекрутер
+    recruiter_role = get_role_by_name_or_id(guild, ROLE_RECRUITER)
+    if recruiter_role:
+        roles.append(recruiter_role)
+    
+    # Владелец
+    owner_role = get_role_by_name_or_id(guild, ROLE_OWNER)
+    if owner_role:
+        roles.append(owner_role)
+    
+    # Зам. владельца
+    dep_owner_role = get_role_by_name_or_id(guild, ROLE_DEP_OWNER)
+    if dep_owner_role:
+        roles.append(dep_owner_role)
+    
+    return roles
 
 async def send_log(guild: discord.Guild | None, actor: discord.abc.User, action: str, details: str = "", color: int = 0xFFFFFF):
     try:
@@ -1913,7 +1954,7 @@ class MclPagedPickView(discord.ui.View):
 REGENT_INFO = """
 **Путь в семью начинается здесь!**
 
-> • Заявки в семью принимаются только на сервер **Memphis**. Уведомление о приглашении на обзвон отправляется в ЛС (или в канал, если ЛС закрыты).
+> • Заявки в семью принимаются только на сервер **Phoenix**. Уведомление о приглашении на обзвон отправляется в ЛС (или в канал, если ЛС закрыты).
 
 > • **Внимательно прочитайте ВСЕ ВОПРОСЫ** при подаче заявки, как основные, так и дополнительные внутри поля для ответа. Если не ответили на все вопросы — **ЗАЯВКА ОТКЛОНЯЕТСЯ.**
 
@@ -1935,7 +1976,6 @@ REGENT_INFO = """
 
 ---
 
-> • Подать заявку можно только при открытом наборе. Если не выходит — набор закрыт.
 """
 
 @bot.command(name="regent")
@@ -1995,31 +2035,20 @@ class RegentTicketModal(Modal):
         if not category:
             category = await guild.create_category(TICKETS_CATEGORY_NAME)
 
-        recruiter_role = discord.utils.get(guild.roles, name=ROLE_RECRUITER)
-        owner_role = discord.utils.get(guild.roles, name=ROLE_OWNER)
-        dep_owner_role = discord.utils.get(guild.roles, name=ROLE_DEP_OWNER)
+        # ИСПРАВЛЕНО: получаем все роли с поддержкой имени через get_allowed_roles
+        allowed_roles = get_allowed_roles(guild)
+        recruiter_role = get_role_by_name_or_id(guild, ROLE_RECRUITER)
+        owner_role = get_role_by_name_or_id(guild, ROLE_OWNER)
+        dep_owner_role = get_role_by_name_or_id(guild, ROLE_DEP_OWNER)
 
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(read_messages=False),
             interaction.user: discord.PermissionOverwrite(read_messages=True, send_messages=True, attach_files=True, embed_links=True),
         }
         
-        if recruiter_role:
-            overwrites[recruiter_role] = discord.PermissionOverwrite(
-                read_messages=True, 
-                send_messages=True,
-                attach_files=True,
-                embed_links=True
-            )
-        if owner_role:
-            overwrites[owner_role] = discord.PermissionOverwrite(
-                read_messages=True, 
-                send_messages=True,
-                attach_files=True,
-                embed_links=True
-            )
-        if dep_owner_role:
-            overwrites[dep_owner_role] = discord.PermissionOverwrite(
+        # Добавляем все роли, которые имеют доступ
+        for role in allowed_roles:
+            overwrites[role] = discord.PermissionOverwrite(
                 read_messages=True, 
                 send_messages=True,
                 attach_files=True,
@@ -2034,7 +2063,7 @@ class RegentTicketModal(Modal):
 
         tickets_db.update_status(ticket_id, "pending", str(channel.id))
 
-        applicant_role = discord.utils.get(guild.roles, name=ROLE_APPLICANT)
+        applicant_role = get_role_by_name_or_id(guild, ROLE_APPLICANT)
         if applicant_role:
             try:
                 await interaction.user.add_roles(applicant_role)
@@ -2314,7 +2343,7 @@ class TicketReviewView(View):
 
         tickets_db.update_status(self.ticket_id, "closed")
 
-        applicant_role = discord.utils.get(interaction.guild.roles, name=ROLE_APPLICANT)
+        applicant_role = get_role_by_name_or_id(interaction.guild, ROLE_APPLICANT)
         if applicant_role:
             try:
                 member = interaction.guild.get_member(int(ticket['user_id']))
@@ -2442,7 +2471,7 @@ class DenyReasonModal(Modal, title="Причина отклонения"):
 
         tickets_db.update_status(self.ticket_id, "closed")
 
-        applicant_role = discord.utils.get(interaction.guild.roles, name=ROLE_APPLICANT)
+        applicant_role = get_role_by_name_or_id(interaction.guild, ROLE_APPLICANT)
         if applicant_role:
             try:
                 member = interaction.guild.get_member(int(ticket['user_id']))
