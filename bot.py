@@ -805,6 +805,11 @@ class CloseTicketView(View):
 # ===================== CAPT С КАТЕГОРИЯМИ =====================
 # ============================================================
 
+# Максимальное количество в основе CAPT
+CAPT_MAIN_LIMIT = 35
+# Максимальное общее количество CAPT (основа + замена)
+CAPT_MAX_TOTAL = 99
+
 def make_main_embed(starts_at: datetime, users: dict, guild: discord.Guild,
                     author: discord.Member, image_url: str, title: str = "CAPTURES!") -> discord.Embed:
     ts = int(starts_at.timestamp())
@@ -818,7 +823,7 @@ def make_main_embed(starts_at: datetime, users: dict, guild: discord.Guild,
         desc += f"**Канал:** {chan}\n"
     
     total = sum(len(v) for v in users.values())
-    desc += f"\n**Список ({total})**\n"
+    desc += f"\n**Список ({total}/{CAPT_MAX_TOTAL})**\n"
 
     emb = discord.Embed(title=title, description=desc, color=0xFFFFFF)
 
@@ -831,7 +836,12 @@ def make_main_embed(starts_at: datetime, users: dict, guild: discord.Guild,
                     user_list.append(f"{i}. {m.mention}")
                 else:
                     user_list.append(f"{i}. <@{uid}>")
-            emb.add_field(name=f"{category_name} [{len(user_ids)}]", value="\n".join(user_list), inline=False)
+            # Добавляем информацию о лимите для основы
+            if category_name == "Основы":
+                limit_text = f" (макс. {CAPT_MAIN_LIMIT})"
+            else:
+                limit_text = ""
+            emb.add_field(name=f"{category_name} [{len(user_ids)}]{limit_text}", value="\n".join(user_list), inline=False)
     
     if not any(users.values()):
         emb.add_field(name="📭", value="Пока никто не записался", inline=False)
@@ -859,7 +869,9 @@ def make_pick_embed(selected_ids, total_count: int, guild: discord.Guild,
 
 class CaptPagedPickView(discord.ui.View):
     PAGE_SIZE = 25
-    MAX_PICK = 25    def __init__(self, capt: "CaptView", picker: discord.Member, category: str = "Основы"):
+    MAX_PICK = 25
+
+    def __init__(self, capt: "CaptView", picker: discord.Member, category: str = "Основы"):
         super().__init__(timeout=300)
         self.capt = capt
         self.picker = picker
@@ -1027,7 +1039,7 @@ class CaptView(discord.ui.View):
         self.author = author
         self.event_name = "CAPT"
         self.image_url = image_url
-        self.title = title  # Новое поле для названия
+        self.title = title
         self.message: discord.Message | None = None
         self.pick_message: discord.Message | None = None
         self._lock = asyncio.Lock()
@@ -1080,6 +1092,8 @@ class CaptView(discord.ui.View):
     async def join(self, interaction: discord.Interaction, _: discord.ui.Button):
         async with self._lock:
             uid = interaction.user.id
+            
+            # Проверяем, не записан ли уже пользователь
             found = False
             for category, user_list in self.users.items():
                 if uid in user_list:
@@ -1087,9 +1101,24 @@ class CaptView(discord.ui.View):
                     break
             
             if not found:
-                self.users["Основы"].append(uid)
+                # Проверяем общий лимит
+                total = sum(len(v) for v in self.users.values())
+                if total >= CAPT_MAX_TOTAL:
+                    await interaction.response.send_message(f"❌ Достигнут общий лимит ({CAPT_MAX_TOTAL} человек)!", ephemeral=True)
+                    return
+                
+                # Проверяем лимит в основе
+                main_count = len(self.users.get("Основы", []))
+                if main_count >= CAPT_MAIN_LIMIT:
+                    # Если основа заполнена - кидаем в замену
+                    if "Замена" not in self.users:
+                        self.users["Замена"] = []
+                    self.users["Замена"].append(uid)
+                    await interaction.response.send_message(f"✅ Основа заполнена (макс. {CAPT_MAIN_LIMIT}), вы добавлены в **замену**!", ephemeral=True)
+                else:
+                    self.users["Основы"].append(uid)
+                    await interaction.response.send_message("✅ Вы записались в **основу**!", ephemeral=True)
         
-        await interaction.response.send_message("✅ Вы записались!", ephemeral=True)
         await send_log(self.guild, interaction.user, f"{self.event_name}: Записаться", "")
         await self.refresh_announce()
 
@@ -1371,14 +1400,29 @@ class UserAddView(discord.ui.View):
                     break
             
             if not found:
-                self.capt.users[self.category].append(uid)
-                added += 1
-                mention_list.append(user.mention)
+                # Проверяем общий лимит
+                total = sum(len(v) for v in self.capt.users.values())
+                if total >= CAPT_MAX_TOTAL:
+                    await interaction.response.send_message(f"❌ Достигнут общий лимит ({CAPT_MAX_TOTAL} человек)!", ephemeral=True)
+                    return
+                
+                # Проверяем лимит основы при добавлении в основу
+                if self.category == "Основы" and len(self.capt.users.get("Основы", [])) >= CAPT_MAIN_LIMIT:
+                    # Если основа заполнена - добавляем в замену
+                    if "Замена" not in self.capt.users:
+                        self.capt.users["Замена"] = []
+                    self.capt.users["Замена"].append(uid)
+                    added += 1
+                    mention_list.append(f"{user.mention} (в замену, т.к. основа заполнена)")
+                else:
+                    self.capt.users[self.category].append(uid)
+                    added += 1
+                    mention_list.append(user.mention)
         
         if added > 0:
             await self.capt.refresh_announce()
             await interaction.response.send_message(
-                f"✅ Добавлено {added} пользователей в категорию **{self.category}**: {', '.join(mention_list[:10])}",
+                f"✅ Добавлено {added} пользователей: {', '.join(mention_list[:10])}",
                 ephemeral=True
             )
         else:
@@ -1593,8 +1637,13 @@ class CategoryClearView(discord.ui.View):
 # ===================== MCL / ZoneWars ========================
 # ============================================================
 
+# Максимальное количество в основе MCL/ZoneWars
+MCL_MAIN_LIMIT = 25
+# Максимальное общее количество MCL/ZoneWars (основа + замена)
+MCL_MAX_TOTAL = 99
+
 class MclView(discord.ui.View):
-    def __init__(self, title_text: str, voice: discord.VoiceChannel, start_at: datetime, tp_at: datetime, guild: discord.Guild, author: discord.Member, event_name: str = "MCL", max_pick: int = 20):
+    def __init__(self, title_text: str, voice: discord.VoiceChannel, start_at: datetime, tp_at: datetime, guild: discord.Guild, author: discord.Member, event_name: str = "MCL", max_pick: int = MCL_MAIN_LIMIT):
         remain = int((tp_at - datetime.now(tz=MOSCOW)).total_seconds()) if MOSCOW else 0
         super().__init__(timeout=max(60, remain + 3600))
         self.title_text = title_text
@@ -1638,7 +1687,7 @@ class MclView(discord.ui.View):
             f"**Начало:** <t:{ts_start}:t> • <t:{ts_start}:R>\n"
             f"**Телепортация:** <t:{ts_tp}:t> • <t:{ts_tp}:R>\n"
             f"**Голосовой канал:** {self.voice.mention}\n\n"
-            f"**Список ({total})**\n"
+            f"**Список ({total}/{MCL_MAX_TOTAL})**\n"
         )
         
         for category_name, user_ids in self.users.items():
@@ -1650,7 +1699,9 @@ class MclView(discord.ui.View):
                         user_list.append(f"{i}. {m.mention}")
                     else:
                         user_list.append(f"{i}. <@{uid}>")
-                desc += f"\n**{category_name} [{len(user_ids)}]**\n" + "\n".join(user_list)
+                # Добавляем информацию о лимите
+                limit_text = f" (макс. {self.max_pick})" if category_name == "Основы" else ""
+                desc += f"\n**{category_name} [{len(user_ids)}]{limit_text}**\n" + "\n".join(user_list)
         
         if total == 0:
             desc += "\n📭 Пока никто не записался"
@@ -1697,9 +1748,24 @@ class MclView(discord.ui.View):
                     break
             
             if not found:
-                self.users["Основы"].append(uid)
+                # Проверяем общий лимит
+                total = sum(len(v) for v in self.users.values())
+                if total >= MCL_MAX_TOTAL:
+                    await interaction.response.send_message(f"❌ Достигнут общий лимит ({MCL_MAX_TOTAL} человек)!", ephemeral=True)
+                    return
+                
+                # Проверяем лимит в основе
+                main_count = len(self.users.get("Основы", []))
+                if main_count >= self.max_pick:
+                    # Если основа заполнена - кидаем в замену
+                    if "Замена" not in self.users:
+                        self.users["Замена"] = []
+                    self.users["Замена"].append(uid)
+                    await interaction.response.send_message(f"✅ Основа заполнена (макс. {self.max_pick}), вы добавлены в **замену**!", ephemeral=True)
+                else:
+                    self.users["Основы"].append(uid)
+                    await interaction.response.send_message("✅ Вы записались в **основу**!", ephemeral=True)
         
-        await interaction.response.send_message("✅ Вы записались!", ephemeral=True)
         await send_log(self.guild, interaction.user, f"{self.event_name}: Записаться", "")
         await self.refresh_main()
 
@@ -1814,7 +1880,7 @@ class MclPagedPickView(discord.ui.View):
             options.append(discord.SelectOption(label=f"{idx}. {label}"[:100], value=str(uid), description=(desc or f"ID {uid}")[:100]))
 
         current_total = sum(len(s) for s in self.page_selections.values())
-        max_pick = getattr(self.mcl, "max_pick", 20)
+        max_pick = getattr(self.mcl, "max_pick", 25)
         remaining = max(0, max_pick - current_total)
         total_pages = (len(self.option_rows) - 1) // self.PAGE_SIZE + 1 if self.option_rows else 1
 
@@ -1843,7 +1909,7 @@ class MclPagedPickView(discord.ui.View):
                         names.append(m.display_name if m else f"ID {uid}")
                     except Exception:
                         names.append(f"ID {uid}")
-            txt = f"Выбрано {current_total}/{getattr(self.mcl, 'max_pick', 20)}:\n" + (", ".join(names) if names else "-")
+            txt = f"Выбрано {current_total}/{getattr(self.mcl, 'max_pick', 25)}:\n" + (", ".join(names) if names else "-")
             self._rebuild_select()
             try:
                 await inter.response.edit_message(content=txt, view=self)
@@ -1903,7 +1969,7 @@ class MclPagedPickView(discord.ui.View):
         chosen: list[int] = []
         for s in self.page_selections.values():
             chosen.extend(list(s))
-        chosen = list(dict.fromkeys(chosen))[:getattr(self.mcl, 'max_pick', 20)]
+        chosen = list(dict.fromkeys(chosen))[:getattr(self.mcl, 'max_pick', 25)]
         
         if not chosen:
             return await interaction.followup.send("Вы не выбрали никого.", ephemeral=True)
@@ -2028,8 +2094,6 @@ class RegentTicketModal(Modal):
 
         allowed_roles = get_allowed_roles(guild)
         recruiter_role = get_role_by_name_or_id(guild, ROLE_RECRUITER)
-        owner_role = get_role_by_name_or_id(guild, ROLE_OWNER)
-        dep_owner_role = get_role_by_name_or_id(guild, ROLE_DEP_OWNER)
 
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(read_messages=False),
@@ -3054,7 +3118,7 @@ async def reward_capt_command(interaction: discord.Interaction, reward_amount: f
 # ===================== SLASH КОМАНДЫ ========================
 # ============================================================
 
-@bot.tree.command(name="create-mcl", description="Создать объявление MCL: описание, канал, старт, телепортация.")
+@bot.tree.command(name="create-mcl", description="Создать объявление MCL: описание, канал, старт, телепортация. Лимит основы 25, общий 99.")
 @role_required_check()
 @app_commands.describe(
     opis="Заголовок/название embed (например MCL).",
@@ -3091,7 +3155,7 @@ async def create_mcl(interaction: discord.Interaction, opis: str, voice: discord
         return await interaction.response.send_message("Укажите время в формате **ЧЧ:ММ** (например 19:00).", ephemeral=True)
 
     author = interaction.user if isinstance(interaction.user, discord.Member) else interaction.guild.get_member(interaction.user.id)
-    view = MclView(opis, voice, start_at, tp_at, interaction.guild, author, event_name="MCL", max_pick=20)
+    view = MclView(opis, voice, start_at, tp_at, interaction.guild, author, event_name="MCL", max_pick=MCL_MAIN_LIMIT)
     embed = view.make_embed()
     embed.set_footer(text=f"Создано {author.display_name}")
     allowed = discord.AllowedMentions(everyone=True)
@@ -3102,7 +3166,7 @@ async def create_mcl(interaction: discord.Interaction, opis: str, voice: discord
     msg = await interaction.channel.send(content="@everyone", embed=embed, view=view, allowed_mentions=allowed)
     view.message = msg
 
-@bot.tree.command(name="create-zonewars", description="Создать объявление ZoneWars: описание, канал, старт, телепортация.")
+@bot.tree.command(name="create-zonewars", description="Создать объявление ZoneWars: описание, канал, старт, телепортация. Лимит основы 25, общий 99.")
 @role_required_check()
 @app_commands.describe(
     opis="Заголовок/название embed (например ZoneWars).",
@@ -3139,7 +3203,7 @@ async def create_zonewars(interaction: discord.Interaction, opis: str, voice: di
         return await interaction.response.send_message("Укажите время в формате **ЧЧ:ММ** (например 19:00).", ephemeral=True)
 
     author = interaction.user if isinstance(interaction.user, discord.Member) else interaction.guild.get_member(interaction.user.id)
-    view = MclView(opis, voice, start_at, tp_at, interaction.guild, author, event_name="ZoneWars", max_pick=25)
+    view = MclView(opis, voice, start_at, tp_at, interaction.guild, author, event_name="ZoneWars", max_pick=MCL_MAIN_LIMIT)
     embed = view.make_embed()
     embed.set_footer(text=f"Создано {author.display_name}")
     allowed = discord.AllowedMentions(everyone=True)
@@ -3150,7 +3214,7 @@ async def create_zonewars(interaction: discord.Interaction, opis: str, voice: di
     msg = await interaction.channel.send(content="@everyone", embed=embed, view=view, allowed_mentions=allowed)
     view.message = msg
 
-@bot.tree.command(name="create-capt", description="Создать CAPT с таймером, картинкой и пингом @everyone.")
+@bot.tree.command(name="create-capt", description="Создать CAPT с таймером, пингом @everyone. Лимит основы 35, общий 99.")
 @role_required_check()
 @app_commands.describe(
     start_time="Время начала 24ч, например 15:40 (московское время).",
