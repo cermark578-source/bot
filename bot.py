@@ -8,7 +8,12 @@ from datetime import datetime, timedelta
 import re
 from dotenv import load_dotenv
 
-load_dotenv()
+# Загружаем .env с игнорированием ошибок синтаксиса
+try:
+    load_dotenv()
+except Exception as e:
+    print(f"⚠️ Ошибка загрузки .env: {e}")
+    print("Продолжаем с переменными окружения из системы...")
 
 # ===== Часовой пояс Москва (UTC+3) =====
 def get_moscow_tz():
@@ -49,14 +54,14 @@ async def _setup_http():
     app.router.add_get("/", _health)
     app.router.add_get("/health", _health)
 
-    host = os.getenv("HOST") or "127.0.0.1"
+    host = os.getenv("HOST") or "0.0.0.0"
     ports_to_try = []
     if os.getenv("PORT"):
         try:
             ports_to_try.append(int(os.getenv("PORT")))
         except Exception:
             pass
-    ports_to_try += [10000, 0]
+    ports_to_try += [10000, 8080, 8000, 0]
 
     runner = web.AppRunner(app)
     await runner.setup()
@@ -79,7 +84,11 @@ async def _setup_http():
 # ===== Конфигурация =====
 TOKEN = os.getenv("DISCORD_TOKEN") or os.getenv("TOKEN")
 GUILD_ID = int(os.getenv("GUILD_ID", "0"))
-REQUIRED_ROLE_ID = int(os.getenv("REQUIRED_ROLE_ID", "0"))
+
+# Роли для доступа к командам (можно указать ID или имена через запятую)
+REQUIRED_ROLES = os.getenv("REQUIRED_ROLES", "").split(",")
+REQUIRED_ROLE_IDS = [int(r.strip()) for r in REQUIRED_ROLES if r.strip().isdigit()]
+
 CAPT_CHANNEL_ID = int(os.getenv("CAPT_CHANNEL_ID", "0"))
 
 # Каналы для логов
@@ -146,10 +155,13 @@ class GuildRoleGatedTree(app_commands.CommandTree):
             raise app_commands.CheckFailure("Эту команду можно использовать только на сервере.")
 
         m: discord.Member = interaction.user
+        
         if m.guild_permissions.administrator or m == interaction.guild.owner:
             return True
-        if REQUIRED_ROLE_ID and any(r.id == REQUIRED_ROLE_ID for r in m.roles):
-            return True
+        
+        for role_id in REQUIRED_ROLE_IDS:
+            if any(r.id == role_id for r in m.roles):
+                return True
 
         raise app_commands.CheckFailure("У вас нет необходимой роли.")
 
@@ -166,10 +178,14 @@ def role_required_check():
         if interaction.guild is None:
             raise app_commands.CheckFailure("Эту команду можно использовать только на сервере.")
         m: discord.Member = interaction.user
+        
         if m.guild_permissions.administrator or m == interaction.guild.owner:
             return True
-        if REQUIRED_ROLE_ID and any(r.id == REQUIRED_ROLE_ID for r in m.roles):
-            return True
+        
+        for role_id in REQUIRED_ROLE_IDS:
+            if any(r.id == role_id for r in m.roles):
+                return True
+        
         raise app_commands.CheckFailure("У вас нет необходимой роли.")
     return app_commands.check(predicate)
 
@@ -875,8 +891,7 @@ class CloseTicketView(View):
             await channel.delete(reason=f"Канал тикета #{self.ticket_id} удалён")
         tickets_db.update_status(self.ticket_id, "deleted")
         await interaction.followup.send("🗑️ Канал удалён!", ephemeral=True)
-
-# ============================================================
+        # ============================================================
 # ===================== CAPT С КАТЕГОРИЯМИ =====================
 # ============================================================
 
@@ -909,7 +924,7 @@ def make_main_embed(starts_at: datetime, users: dict, guild: discord.Guild,
                     user_list.append(f"{i}. {m.mention}")
                 else:
                     user_list.append(f"{i}. <@{uid}>")
-            if category_name == "Основы":
+            if category_name == "Основа":
                 limit_text = f" (макс. {CAPT_MAIN_LIMIT})"
             else:
                 limit_text = ""
@@ -943,7 +958,7 @@ class CaptPagedPickView(discord.ui.View):
     PAGE_SIZE = 25
     MAX_PICK = 25
 
-    def __init__(self, capt: "CaptView", picker: discord.Member, category: str = "Основы"):
+    def __init__(self, capt: "CaptView", picker: discord.Member, category: str = "Основа"):
         super().__init__(timeout=300)
         self.capt = capt
         self.picker = picker
@@ -1102,7 +1117,7 @@ class CaptView(discord.ui.View):
         super().__init__(timeout=timeout_seconds)
         self.starts_at = starts_at
         self.users: dict[str, list[int]] = {
-            "Основы": [],
+            "Основа": [],
             "Замена": []
         }
         self.picked_list = []
@@ -1177,7 +1192,7 @@ class CaptView(discord.ui.View):
                     await interaction.response.send_message(f"❌ Достигнут общий лимит ({CAPT_MAX_TOTAL} человек)!", ephemeral=True)
                     return
                 
-                main_count = len(self.users.get("Основы", []))
+                main_count = len(self.users.get("Основа", []))
                 if main_count >= CAPT_MAIN_LIMIT:
                     if "Замена" not in self.users:
                         self.users["Замена"] = []
@@ -1221,7 +1236,7 @@ class CaptView(discord.ui.View):
     @discord.ui.button(label="ВЫБОР", style=discord.ButtonStyle.primary)
     async def pick(self, interaction: discord.Interaction, _: discord.ui.Button):
         mem: discord.Member = interaction.user
-        if not (mem.guild_permissions.administrator or mem == self.author or (REQUIRED_ROLE_ID and any(r.id == REQUIRED_ROLE_ID for r in mem.roles))):
+        if not (mem.guild_permissions.administrator or mem == self.author or (REQUIRED_ROLE_IDS and any(r.id in REQUIRED_ROLE_IDS for r in mem.roles))):
             await interaction.response.send_message("❌ Только создатель / администратор / уполномоченная роль могут выбирать людей.", ephemeral=True)
             return
         
@@ -1284,7 +1299,7 @@ class CaptPickedControlsView(discord.ui.View):
     @discord.ui.button(label="ПАНЕЛЬ", style=discord.ButtonStyle.primary)
     async def open_panel(self, interaction: discord.Interaction, _: discord.ui.Button):
         mem: discord.Member = interaction.user
-        if mem.guild_permissions.administrator or mem == self.capt.author or (REQUIRED_ROLE_ID and any(r.id == REQUIRED_ROLE_ID for r in mem.roles)):
+        if mem.guild_permissions.administrator or mem == self.capt.author or (REQUIRED_ROLE_IDS and any(r.id in REQUIRED_ROLE_IDS for r in mem.roles)):
             await interaction.response.send_message("Панель CAPT", view=PanelView(self.capt, mem), ephemeral=True)
         else:
             await interaction.response.send_message("Недостаточно прав для панели CAPT.", ephemeral=True)
@@ -1328,7 +1343,7 @@ class PanelView(discord.ui.View):
         mem: discord.Member = interaction.user
         if mem.guild_permissions.administrator or mem == self.capt.author:
             return True
-        if REQUIRED_ROLE_ID and any(r.id == REQUIRED_ROLE_ID for r in mem.roles):
+        if REQUIRED_ROLE_IDS and any(r.id in REQUIRED_ROLE_IDS for r in mem.roles):
             return True
         await interaction.response.send_message("Недостаточно прав для панели CAPT.", ephemeral=True)
         return False
@@ -1480,7 +1495,7 @@ class UserAddView(discord.ui.View):
                     await interaction.response.send_message(f"❌ Достигнут общий лимит ({CAPT_MAX_TOTAL} человек)!", ephemeral=True)
                     return
                 
-                if self.category == "Основы" and len(self.capt.users.get("Основы", [])) >= CAPT_MAIN_LIMIT:
+                if self.category == "Основа" and len(self.capt.users.get("Основа", [])) >= CAPT_MAIN_LIMIT:
                     if "Замена" not in self.capt.users:
                         self.capt.users["Замена"] = []
                     self.capt.users["Замена"].append(uid)
@@ -1710,8 +1725,7 @@ class CategoryClearView(discord.ui.View):
                 await interaction.response.send_message(f"✅ Категория **{category}** очищена.", ephemeral=True)
                 return False
         return True
-
-# ============================================================
+        # ============================================================
 # ===================== MCL / ZoneWars ========================
 # ============================================================
 
@@ -1732,7 +1746,7 @@ class MclView(discord.ui.View):
         self.message: discord.Message | None = None
         self.max_pick = int(max(1, max_pick))
         self.users: dict[str, list[int]] = {
-            "Основы": [],
+            "Основа": [],
             "Замена": []
         }
         self.selected_ids: list[int] = []
@@ -1775,7 +1789,7 @@ class MclView(discord.ui.View):
                         user_list.append(f"{i}. {m.mention}")
                     else:
                         user_list.append(f"{i}. <@{uid}>")
-                limit_text = f" (макс. {self.max_pick})" if category_name == "Основы" else ""
+                limit_text = f" (макс. {self.max_pick})" if category_name == "Основа" else ""
                 desc += f"\n**{category_name} [{len(user_ids)}]{limit_text}**\n" + "\n".join(user_list)
         
         if total == 0:
@@ -1828,7 +1842,7 @@ class MclView(discord.ui.View):
                     await interaction.response.send_message(f"❌ Достигнут общий лимит ({MCL_MAX_TOTAL} человек)!", ephemeral=True)
                     return
                 
-                main_count = len(self.users.get("Основы", []))
+                main_count = len(self.users.get("Основа", []))
                 if main_count >= self.max_pick:
                     if "Замена" not in self.users:
                         self.users["Замена"] = []
@@ -1836,7 +1850,7 @@ class MclView(discord.ui.View):
                     await interaction.response.send_message(f"✅ Основа заполнена (макс. {self.max_pick}), вы добавлены в **замену**!", ephemeral=True)
                     await send_mcl_log(self.guild, f"Запись в {self.event_name}", f"{interaction.user.mention} записался в замену")
                 else:
-                    self.users["Основы"].append(uid)
+                    self.users["Основа"].append(uid)
                     await interaction.response.send_message("✅ Вы записались в **основу**!", ephemeral=True)
                     await send_mcl_log(self.guild, f"Запись в {self.event_name}", f"{interaction.user.mention} записался в основу")
         
@@ -1871,7 +1885,7 @@ class MclView(discord.ui.View):
     @discord.ui.button(label="ВЫБОР", style=discord.ButtonStyle.primary)
     async def pick_btn(self, interaction: discord.Interaction, _: discord.ui.Button):
         mem: discord.Member = interaction.user
-        if not (mem.guild_permissions.administrator or mem == self.author or (REQUIRED_ROLE_ID and any(r.id == REQUIRED_ROLE_ID for r in mem.roles))):
+        if not (mem.guild_permissions.administrator or mem == self.author or (REQUIRED_ROLE_IDS and any(r.id in REQUIRED_ROLE_IDS for r in mem.roles))):
             await interaction.response.send_message("❌ Только создатель / администратор / уполномоченная роль могут выбирать людей.", ephemeral=True)
             return
         
@@ -1929,7 +1943,7 @@ class MclCategoryChoiceView(discord.ui.View):
 class MclPagedPickView(discord.ui.View):
     PAGE_SIZE = 25
 
-    def __init__(self, mcl: "MclView", picker: discord.Member, category: str = "Основы"):
+    def __init__(self, mcl: "MclView", picker: discord.Member, category: str = "Основа"):
         super().__init__(timeout=300)
         self.mcl = mcl
         self.picker = picker
@@ -2031,7 +2045,7 @@ class MclPagedPickView(discord.ui.View):
 
     @discord.ui.button(label="➡️ Оставить в записи", style=discord.ButtonStyle.success)
     async def keep_in_signup(self, interaction: discord.Interaction, _: discord.ui.Button):
-        await self._move_users(interaction, "Основы")
+        await self._move_users(interaction, "Основа")
 
     @discord.ui.button(label="🔄 Переместить в замену", style=discord.ButtonStyle.primary)
     async def move_to_backup(self, interaction: discord.Interaction, _: discord.ui.Button):
@@ -2795,8 +2809,7 @@ async def history_command(ctx: commands.Context, limit: int = 10):
         )
 
     await ctx.send(embed=embed)
-
-# ============================================================
+    # ============================================================
 # ===================== СИСТЕМА БАЛЛОВ ========================
 # ============================================================
 
